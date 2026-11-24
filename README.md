@@ -2,7 +2,7 @@
 
 Copy Supreme Brands data from Acumatica into a SQLite database on your Mac. Then check the data quality.
 
-**Status:** Step 1 – copy the data. (Quality checks and plain-English questions come later.)
+**Status:** Step 1 – copy the data. Step 2 – first data quality report. (Plain-English questions come later.)
 
 ## How it works
 
@@ -43,6 +43,25 @@ sqlite3 data/supreme.db "SELECT * FROM _sync_log;"
 ```
 
 Or open `data/supreme.db` with [DB Browser for SQLite](https://sqlitebrowser.org/).
+
+## Data quality report
+
+After `sync.py`, run:
+
+```bash
+python quality_report.py
+```
+
+It makes:
+
+- `reports/quality_report.md` – summary of possible issues, with a possible fix for each issue
+- `reports/*.csv` – the rows for each issue (open in Excel)
+
+Checks now: missing values and duplicate rows in all tables; duplicate supplier bills, the same supplier under
+different IDs, and bills with no invoice number or description; duplicate customers and missing or incorrect
+contact details.
+
+The script only reads the database. The `reports/` folder is not sent to GitHub, because it contains business data.
 
 ## If an inquiry fails
 
