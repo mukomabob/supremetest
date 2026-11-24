@@ -21,6 +21,8 @@ from dotenv import load_dotenv
 load_dotenv()
 DB_PATH = os.getenv("DB_PATH", "data/supreme.db")
 OUT = "reports"
+# Email domains that belong to Supreme Brands itself (comma-separated in .env)
+OWN_EMAIL_DOMAINS = [d.strip().lower() for d in os.getenv("OWN_EMAIL_DOMAINS", "supremebrands").split(",") if d.strip()]
 
 # Words removed before names are compared ("ABC (Pvt) Ltd" == "abc private limited")
 NAME_NOISE = r"\b(pvt|private|ltd|limited|t/a|ta|inc|co|company|the|and|&)\b"
@@ -60,6 +62,16 @@ def norm_name(s):
     s = re.sub(r"[^\w\s&/]", " ", str(s).lower())
     s = re.sub(NAME_NOISE, " ", s)
     return re.sub(r"\s+", " ", s).strip()
+
+
+def split_emails(v):
+    """A field can hold more than one address, separated by ; or ,"""
+    return [a.strip() for a in re.split(r"[;,]", str(v)) if a.strip()]
+
+
+def is_own_email(addr):
+    domain = addr.split("@")[-1].lower()
+    return any(d in domain for d in OWN_EMAIL_DOMAINS)
 
 
 def write_csv(name, header, rows):
@@ -256,11 +268,24 @@ def customer_checks(con, rep):
                 rep.finding(f"Customers ({t})", f"Customers with {label}", len(miss),
                             "Collect the missing contact details, starting with active customers.")
         if email:
-            bad = [r for r in rows if not is_blank(r[email]) and not EMAIL_RE.match(str(r[email]).strip())]
+            bad, own = [], []
+            for r in rows:
+                if is_blank(r[email]):
+                    continue
+                addrs = split_emails(r[email])
+                if any(not EMAIL_RE.match(a) for a in addrs):
+                    bad.append(r)
+                if any(is_own_email(a) for a in addrs):
+                    own.append(r)
             f = write_csv(f"{t}_invalid_emails.csv", cols, [[r[c] for c in cols] for r in bad]) if bad else None
             rep.add(f"- **Customers with an email in an incorrect format:** {len(bad)}")
             rep.finding(f"Customers ({t})", "Email addresses in an incorrect format", len(bad),
                         "Correct the email addresses. Invoices and statements sent by email will fail.", f)
+            f = write_csv(f"{t}_own_company_emails.csv", cols, [[r[c] for c in cols] for r in own]) if own else None
+            rep.add(f"- **Customer records with a Supreme Brands email address:** {len(own)}")
+            rep.finding(f"Customers ({t})", "Customer record uses a Supreme Brands email address", len(own),
+                        "Get the customer's own email address. Now, statements and invoices for these customers "
+                        "go to Supreme Brands, not to the customer.", f)
         rep.add("")
 
 
