@@ -16,9 +16,11 @@ import sqlite3
 import datetime as dt
 from collections import defaultdict
 
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 DB_PATH = os.getenv("DB_PATH", "data/supreme.db")
 OUT = "reports"
 # Email domains that belong to Supreme Brands itself (comma-separated in .env)
@@ -161,11 +163,25 @@ def supplier_checks(con, rep):
             "If a column is wrong or `None`, tell Claude the correct column name.", "")
 
     rows = [dict(zip(cols, r)) for r in con.execute(f"SELECT * FROM {q(t)}")]
+    if vid:  # Acumatica pads IDs with spaces ("V000040   ")
+        for r in rows:
+            if isinstance(r[vid], str):
+                r[vid] = r[vid].strip()
+
+    # Debit/credit adjustments usually repeat the invoice number of the bill they correct,
+    # so the duplicate and missing-value checks use bills only.
+    doctype = find_col(cols, "doctype", "type", exclude=("entity", "retainage"))
+    if doctype:
+        bills = [r for r in rows if "bill" in str(r[doctype]).lower()]
+        rep.add(f"Document type column = `{doctype}`. Checks 2a, 2b, 2d and 2e use only bills "
+                f"({len(bills):,} of {len(rows):,} documents). Adjustments are not included.", "")
+    else:
+        bills = rows
 
     # 2a. Same vendor reference used on more than one bill for the same vendor
     if vid and vref:
         groups = defaultdict(list)
-        for r in rows:
+        for r in bills:
             if not is_blank(r[vref]):
                 groups[(r[vid], str(r[vref]).strip().upper())].append(r)
         dup = [g for g in groups.values() if len(g) > 1]
@@ -179,7 +195,7 @@ def supplier_checks(con, rep):
     # 2b. Same vendor + amount + date
     if vid and amount and date:
         groups = defaultdict(list)
-        for r in rows:
+        for r in bills:
             if r[amount] not in (None, 0, "0"):
                 groups[(r[vid], r[amount], str(r[date])[:10])].append(r)
         dup = [g for g in groups.values() if len(g) > 1]
@@ -212,12 +228,21 @@ def supplier_checks(con, rep):
                              "Ask the team to add a short description (what was bought)."),
                             (vid, "Bills with no vendor ID", "Investigate; every bill must have a supplier.")):
         if col:
-            miss = [r for r in rows if is_blank(r[col])]
+            miss = [r for r in bills if is_blank(r[col])]
             safe = re.sub(r"\W+", "_", col.lower())
             f = write_csv(f"supplier_missing_{safe}.csv", cols,
                           [[r[c] for c in cols] for r in miss]) if miss else None
             rep.add(f"- **{label}:** {len(miss)}")
             rep.finding("Suppliers", label, len(miss), fix, f)
+
+    # 2e. Supplier invoice number field holds words, not an invoice number (no digits at all)
+    if vref:
+        words = [r for r in bills if not is_blank(r[vref]) and not re.search(r"\d", str(r[vref]))]
+        f = write_csv("supplier_invoice_number_is_text.csv", cols, [[r[c] for c in cols] for r in words]) if words else None
+        rep.add(f"- **Supplier invoice number field has only words (no numbers):** {len(words)}")
+        rep.finding("Suppliers", "Supplier invoice number field has only words (for example 'payment')", len(words),
+                    "Train the team to type the supplier's real invoice number in this field, and to put other "
+                    "text in the description. Without real numbers, Acumatica cannot find duplicate bills.", f)
     rep.add("")
 
 
@@ -289,12 +314,136 @@ def customer_checks(con, rep):
         rep.add("")
 
 
+# ---------- Excel workbook ----------
+
+SHEET_NAMES = {
+    "supplier_duplicate_vendor_refs": "Sup - same invoice no",
+    "supplier_possible_duplicate_bills": "Sup - same amount and date",
+    "supplier_same_name_different_ids": "Sup - one name many IDs",
+    "supplier_invoice_number_is_text": "Sup - invoice no is words",
+    "supplier_missing_description": "Sup - no description",
+    "supplier_missing_vendorref": "Sup - no invoice no",
+    "customersip_own_company_emails": "Cust - Supreme Brands email",
+    "customersip_invalid_emails": "Cust - incorrect email",
+    "customersip_same_name_different_ids": "Cust - one name many IDs",
+    "bi_customersummary_same_name_different_ids": "CustSum - one name many IDs",
+    "bi_customersummary_invalid_emails": "CustSum - incorrect email",
+    "bi_customersummary_own_company_emails": "CustSum - SB email",
+}
+
+
+def sheet_name(csv_file, used):
+    stem = os.path.splitext(os.path.basename(csv_file))[0]
+    name = SHEET_NAMES.get(stem, stem.replace("_", " "))[:31]
+    base, i = name, 2
+    while name in used:
+        name = f"{base[:28]} {i}"
+        i += 1
+    used.add(name)
+    return name
+
+
+def write_workbook(findings, sync, path):
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        print("Excel file not made: run  pip install openpyxl")
+        return None
+    font, bold = Font(name="Arial", size=10), Font(name="Arial", size=10, bold=True)
+    head_fill = PatternFill("solid", start_color="D9E1F2")
+    link_font = Font(name="Arial", size=10, color="0563C1", underline="single")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Summary"
+    ws["A1"] = "Supreme Brands – first data quality report"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True)
+    ws["A2"] = (f"Made {dt.datetime.now():%d %b %Y}. Source: {len(sync)} Acumatica inquiries copied with OData. "
+                "These are possible issues found by automatic checks. Check each one before you change data.")
+    ws["A2"].font = font
+    headers = ["Area", "Issue", "Count", "Possible fix", "Evidence sheet"]
+    for i, h in enumerate(headers, 1):
+        c = ws.cell(row=4, column=i, value=h)
+        c.font, c.fill = bold, head_fill
+
+    used = {"Summary"}
+    detail_sheets = []
+    r = 5
+    for area, issue, count, fix, f in sorted(findings, key=lambda x: (x[0], -x[2])):
+        ws.cell(row=r, column=1, value=area)
+        ws.cell(row=r, column=2, value=issue)
+        ws.cell(row=r, column=4, value=fix)
+        if f and os.path.exists(f):
+            name = sheet_name(f, used)
+            detail_sheets.append((name, f, issue))
+            # number of evidence rows = all filled cells in column A, minus the title and the header
+            ws.cell(row=r, column=3, value=f"=COUNTA('{name}'!A:A)-2")
+            link = ws.cell(row=r, column=5, value=name)
+            link.hyperlink = f"#'{name}'!A1"
+            link.font = link_font
+        else:
+            ws.cell(row=r, column=3, value=count)
+            ws.cell(row=r, column=5, value="(count only)")
+        for col in (1, 2, 3, 4):
+            ws.cell(row=r, column=col).font = font
+        if ws.cell(row=r, column=5).font != link_font:
+            ws.cell(row=r, column=5).font = font
+        ws.cell(row=r, column=3).number_format = "#,##0"
+        for col in (2, 4):
+            ws.cell(row=r, column=col).alignment = Alignment(wrap_text=True, vertical="top")
+        r += 1
+
+    r += 1
+    ws.cell(row=r, column=1, value="Data used").font = bold
+    for inquiry, rows, synced in sync:
+        r += 1
+        ws.cell(row=r, column=1, value=inquiry).font = font
+        c = ws.cell(row=r, column=3, value=rows)
+        c.font, c.number_format = font, "#,##0"
+    for col, w in zip("ABCDE", (30, 55, 10, 70, 32)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A5"
+
+    for name, f, issue in detail_sheets:
+        d = wb.create_sheet(name)
+        d["A1"] = issue
+        d["A1"].font = Font(name="Arial", size=12, bold=True)
+        with open(f, newline="", encoding="utf-8") as fh:
+            rows = list(csv.reader(fh))
+        for ri, row in enumerate(rows, 2):
+            for ci, v in enumerate(row, 1):
+                try:
+                    v = float(v) if re.fullmatch(r"-?\d+\.\d+", v) else int(v) if re.fullmatch(r"-?\d{1,12}", v) else v
+                except ValueError:
+                    pass
+                c = d.cell(row=ri, column=ci, value=v)
+                c.font = bold if ri == 2 else font
+                if ri == 2:
+                    c.fill = head_fill
+        if rows:
+            for ci, h in enumerate(rows[0], 1):
+                width = max([len(str(h))] + [len(str(x[ci - 1])) for x in rows[1:200] if len(x) >= ci])
+                d.column_dimensions[get_column_letter(ci)].width = min(max(width + 2, 8), 45)
+            d.auto_filter.ref = f"A2:{get_column_letter(len(rows[0]))}{len(rows) + 1}"
+            d.freeze_panes = "A3"
+    wb.save(path)
+    return path
+
+
 # ---------- main ----------
 
 def main():
     if not os.path.exists(DB_PATH):
         raise SystemExit(f"No database at {DB_PATH}. Run: python sync.py")
     os.makedirs(OUT, exist_ok=True)
+    for old in os.listdir(OUT):  # remove results of the last run, so no old file stays
+        if old.endswith(".csv"):
+            try:
+                os.remove(os.path.join(OUT, old))
+            except OSError:
+                pass
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     rep = Report()
 
@@ -326,7 +475,10 @@ def main():
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(head + rep.lines))
     con.close()
+    xlsx = write_workbook(rep.findings, sync, os.path.join(OUT, "quality_report.xlsx"))
     print(f"Report: {path}")
+    if xlsx:
+        print(f"Excel:  {xlsx}")
     print(f"Detail files: {OUT}/*.csv")
     print(f"{len(rep.findings)} types of issue found.")
 

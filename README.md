@@ -55,9 +55,10 @@ python quality_report.py
 It makes:
 
 - `reports/quality_report.md` – summary of possible issues, with a possible fix for each issue
-- `reports/*.csv` – the rows for each issue (open in Excel)
+- `reports/quality_report.xlsx` – Summary sheet plus one evidence sheet for each issue
+- `reports/*.csv` – the rows for each issue
 
-Checks now: missing values and duplicate rows in all tables; duplicate supplier bills, the same supplier under
+Checks now: missing values and duplicate rows in all tables; duplicate supplier bills (bills only, not adjustments), invoice numbers with only words, the same supplier under
 different IDs, and bills with no invoice number or description; duplicate customers and missing or incorrect
 contact details.
 
