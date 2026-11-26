@@ -77,6 +77,8 @@ def clean(v):
     if isinstance(v, bool):
         return int(v)
     if isinstance(v, str):
+        if re.fullmatch(r"-?\d+\.\d+", v):  # OData v3 sends decimals as text, e.g. "12.5000"
+            return float(v)
         m = re.fullmatch(r"/Date\((-?\d+)[+-]?\d*\)/", v)  # OData v3 date format
         if m:
             return dt.datetime.fromtimestamp(int(m.group(1)) / 1000, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

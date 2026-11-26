@@ -64,6 +64,17 @@ contact details.
 
 The script only reads the database. The `reports/` folder is not sent to GitHub, because it contains business data.
 
+## Audit tests
+
+```bash
+python audit_tests.py
+```
+
+Runs 25 audit-style tests on the full population of data (GL journals, November movement TB, suppliers,
+customers, sales orders, inventory) and makes `reports/audit_tests.xlsx` with a Summary sheet, a Notes sheet
+and one sheet for each test. Each result is an exception to investigate, not a proven error.
+Thresholds are at the top of `audit_tests.py`.
+
 ## If an inquiry fails
 
 - **Timeout:** set a smaller `PAGE_SIZE` in `.env` (for example 1000).
