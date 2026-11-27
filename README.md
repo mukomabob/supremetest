@@ -86,6 +86,16 @@ customers, concentration, collections, sales volume, top products, purchases, pr
 with QoQ and YoY growth and a chart. Period and currency: `PERIOD_START`, `PERIOD_END`, `BASE_CURRENCY` in `.env`
 (default 2023-07-01 to 2026-09-30, USD). Large document pairs that cancel each other are listed on "Excluded".
 
+## Red flags for possible loss of money
+
+```bash
+python fraud_red_flags.py
+```
+
+Makes `reports/fraud_red_flags.xlsx`: 18 red-flag tests (customer cash, payments out, cash purchases,
+Benford's Law, low manual prices, cash received vs deposits) and a "red flags per person" sheet.
+A red flag is a reason to look closer, not proof. The file contains staff names: share it carefully.
+
 ## If an inquiry fails
 
 - **Timeout:** set a smaller `PAGE_SIZE` in `.env` (for example 1000).

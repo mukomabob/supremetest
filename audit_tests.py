@@ -401,10 +401,15 @@ def load_numeric_copy(path):
 INFO_TESTS = {"GL-01", "GL-06", "TB-01", "AP-06", "AP-07", "AR-03", "AR-04", "SO-02"}
 
 
-def write_workbook(results, notes, path):
+def write_workbook(results, notes, path, title="Supreme Brands – audit tests on Acumatica data", info=None):
+    info = INFO_TESTS if info is None else info
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    def safe(v):  # remove control characters that Excel does not accept
+        return ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v
 
     f, b = Font(name="Arial", size=10), Font(name="Arial", size=10, bold=True)
     fill = PatternFill("solid", start_color="D9E1F2")
@@ -414,7 +419,7 @@ def write_workbook(results, notes, path):
     wb = Workbook()
     ws = wb.active
     ws.title = "Summary"
-    ws["A1"] = "Supreme Brands – audit tests on Acumatica data"
+    ws["A1"] = title
     ws["A1"].font = Font(name="Arial", size=14, bold=True)
     ws["A2"] = (f"Made {dt.datetime.now():%d %b %Y %H:%M}. Each result is an exception to investigate, "
                 "not a proven error. 'Information' sheets are analysis, not exceptions.")
@@ -425,7 +430,7 @@ def write_workbook(results, notes, path):
         c.font, c.fill = b, fill
     for r, t in enumerate(results, 5):
         name = t["id"]
-        vals = [t["id"], t["area"], t["title"], "Information" if name in INFO_TESTS else "Exception",
+        vals = [t["id"], t["area"], t["title"], "Information" if name in info else "Exception",
                 f"=MAX(COUNTA('{name}'!A:A)-3,0)", t["why"], t["follow_up"], name]
         for i, v in enumerate(vals, 1):
             c = ws.cell(row=r, column=i, value=v)
@@ -457,7 +462,7 @@ def write_workbook(results, notes, path):
             c.font, c.fill = b, fill
         for ri, row in enumerate(t["rows"][:MAX_SHEET_ROWS], 4):
             for ci, v in enumerate(row, 1):
-                d.cell(row=ri, column=ci, value=v).font = f
+                d.cell(row=ri, column=ci, value=safe(v)).font = f
         if len(t["rows"]) > MAX_SHEET_ROWS:
             d.cell(row=MAX_SHEET_ROWS + 5, column=1,
                    value=f"Only the first {MAX_SHEET_ROWS:,} of {len(t['rows']):,} rows are shown.").font = b
