@@ -75,6 +75,17 @@ customers, sales orders, inventory) and makes `reports/audit_tests.xlsx` with a 
 and one sheet for each test. Each result is an exception to investigate, not a proven error.
 Thresholds are at the top of `audit_tests.py`.
 
+## Quarterly performance analysis
+
+```bash
+python performance_analysis.py
+```
+
+Makes `reports/performance_analysis.xlsx`: one metric per sheet (net sales, invoices, credit memos, active
+customers, concentration, collections, sales volume, top products, purchases, production, other currencies),
+with QoQ and YoY growth and a chart. Period and currency: `PERIOD_START`, `PERIOD_END`, `BASE_CURRENCY` in `.env`
+(default 2023-07-01 to 2026-09-30, USD). Large document pairs that cancel each other are listed on "Excluded".
+
 ## If an inquiry fails
 
 - **Timeout:** set a smaller `PAGE_SIZE` in `.env` (for example 1000).
