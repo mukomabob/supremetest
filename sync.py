@@ -19,10 +19,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE = os.getenv("ACUMATICA_URL", "").rstrip("/")
-TENANT = os.getenv("ACUMATICA_TENANT", "").strip()
-USER = os.getenv("ACUMATICA_USER", "")
-PASSWORD = os.getenv("ACUMATICA_PASSWORD", "")
+def env(name, default=""):
+    """Read ODATA_<name>; the old ACUMATICA_<name> still works as a fallback."""
+    return os.getenv(f"ODATA_{name}", os.getenv(f"ACUMATICA_{name}", default))
+
+
+BASE = env("URL").rstrip("/")
+TENANT = env("TENANT").strip()
+USER = env("USER")
+PASSWORD = env("PASSWORD")
 PAGE_SIZE = int(os.getenv("PAGE_SIZE", "5000"))
 DB_PATH = os.getenv("DB_PATH", "data/supreme.db")
 SKIP = {s.strip() for s in os.getenv("SKIP_INQUIRIES", "").split(",") if s.strip()}
@@ -38,7 +43,7 @@ def session() -> requests.Session:
 
 def check(r: requests.Response):
     if r.status_code == 401:
-        sys.exit("401 Unauthorized: check ACUMATICA_USER, ACUMATICA_PASSWORD and ACUMATICA_TENANT in .env.")
+        sys.exit("401 Unauthorized: check ODATA_USER, ODATA_PASSWORD and ODATA_TENANT in .env.")
     r.raise_for_status()
 
 
@@ -110,7 +115,7 @@ def save(con, name: str, rows: list):
 
 def main():
     if not (BASE and USER and PASSWORD):
-        sys.exit("Copy .env.example to .env and fill in ACUMATICA_URL, ACUMATICA_USER and ACUMATICA_PASSWORD.")
+        sys.exit("Copy .env.example to .env and fill in ODATA_URL, ODATA_USER and ODATA_PASSWORD.")
     s = session()
     names = list_inquiries(s)
 
